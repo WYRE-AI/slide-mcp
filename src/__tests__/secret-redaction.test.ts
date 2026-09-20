@@ -63,6 +63,34 @@ describe('secret redaction', () => {
     expect(parsed.data[0].passphrases).toEqual([{ agent_passphrase_id: 'p1', name: 'primary' }]);
   });
 
+  it('slide_list_networks strips ipsec_conns[].psk and wg_peers[].wg_private_key from every item in the list', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        pagination: {},
+        data: [
+          {
+            network_id: 'n1',
+            name: 'dr-net',
+            ipsec_conns: [{ ipsec_id: 'i1', name: 'main-office', psk: 'shh-ipsec-key' }],
+            wg_peers: [
+              { wg_peer_id: 'w1', peer_name: 'laptop', wg_public_key: 'pub-key-ok', wg_private_key: 'shh-wg-key' },
+            ],
+          },
+          { network_id: 'n2', name: 'empty-net', ipsec_conns: [], wg_peers: [] },
+        ],
+      })
+    );
+
+    const result = await runWithCredentials(creds, () => handleNetworkTool('slide_list_networks', {}));
+
+    const text = textOf(result);
+    expect(text).not.toMatch(/shh-ipsec-key/);
+    expect(text).not.toMatch(/shh-wg-key/);
+    const parsed = JSON.parse(text);
+    expect(parsed.data[0].ipsec_conns).toEqual([{ ipsec_id: 'i1', name: 'main-office' }]);
+    expect(parsed.data[0].wg_peers).toEqual([{ wg_peer_id: 'w1', peer_name: 'laptop', wg_public_key: 'pub-key-ok' }]);
+  });
+
   it('slide_get_network strips ipsec_conns[].psk and wg_peers[].wg_private_key, keeps wg_public_key', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
@@ -85,6 +113,28 @@ describe('secret redaction', () => {
     expect(parsed.wg_peers).toEqual([{ wg_peer_id: 'w1', peer_name: 'laptop', wg_public_key: 'pub-key-ok' }]);
   });
 
+  it('slide_list_image_exports strips the Samba password from every item in the list', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        pagination: {},
+        data: [
+          { image_export_id: 'ie1', image_type: 'vhdx', password: 'shh-samba-pw' },
+          { image_export_id: 'ie2', image_type: 'raw', password: 'shh-samba-pw-2' },
+        ],
+      })
+    );
+
+    const result = await runWithCredentials(creds, () => handleRestoreImageTool('slide_list_image_exports', {}));
+
+    const text = textOf(result);
+    expect(text).not.toMatch(/shh-samba-pw/);
+    const parsed = JSON.parse(text);
+    expect(parsed.data).toEqual([
+      { image_export_id: 'ie1', image_type: 'vhdx' },
+      { image_export_id: 'ie2', image_type: 'raw' },
+    ]);
+  });
+
   it('slide_get_image_export strips the Samba password', async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({ image_export_id: 'ie1', image_type: 'vhdx', password: 'shh-samba-pw' })
@@ -97,6 +147,33 @@ describe('secret redaction', () => {
     const text = textOf(result);
     expect(text).not.toMatch(/shh-samba-pw/);
     expect(JSON.parse(text)).toEqual({ image_export_id: 'ie1', image_type: 'vhdx' });
+  });
+
+  it('slide_list_virtual_machines strips vnc_password from every item, keeps vnc connection info and vnc_enabled', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        pagination: {},
+        data: [
+          {
+            virt_id: 'v1',
+            vnc_enabled: true,
+            vnc: [{ host: '192.168.1.53', port: 12345, type: 'local' }],
+            vnc_password: 'shh-vnc-pw',
+          },
+          { virt_id: 'v2', vnc_enabled: false, vnc: [], vnc_password: 'shh-vnc-pw-2' },
+        ],
+      })
+    );
+
+    const result = await runWithCredentials(creds, () => handleRestoreVirtTool('slide_list_virtual_machines', {}));
+
+    const text = textOf(result);
+    expect(text).not.toMatch(/shh-vnc-pw/);
+    const parsed = JSON.parse(text);
+    expect(parsed.data[0].vnc_enabled).toBe(true);
+    expect(parsed.data[0].vnc).toEqual([{ host: '192.168.1.53', port: 12345, type: 'local' }]);
+    expect(parsed.data[0].vnc_password).toBeUndefined();
+    expect(parsed.data[1].vnc_password).toBeUndefined();
   });
 
   it('slide_get_virtual_machine strips vnc_password but keeps vnc connection info and vnc_enabled', async () => {
