@@ -108,6 +108,20 @@ Slide authenticates with a **static bearer API token**, issued per-account in th
 
 They can be added as a follow-up if there's demand, after a deliberate scope decision - not by default.
 
+## Credential scope
+
+**This connector's own code is read-only by construction — but Slide also offers a real way to make the underlying credential read-only too, and we recommend using it.**
+
+Slide documents six account roles: Account Owner, Account Admin, Business Continuity Technician, Billing, and **Read Only** (read-only access to all resources). An API token inherits the role of whoever generates it in the Slide Console (Settings → API Keys).
+
+**Recommended: generate this connector's API token from a dedicated user with the Read Only role**, not from an Account Owner/Admin user. This means that even if the token is ever exposed outside Conduit's control (a credential-store compromise, a misconfigured log, etc.), it cannot be used to delete backups, restores, networks, or devices — matching this connector's own read-only code with a read-only credential, rather than relying on the connector's code as the only safeguard.
+
+Two separate claims, kept at different confidence levels:
+- **Structurally verified (checked directly, stated with full confidence):** this connector's own code makes zero mutating calls (`client.ts` has exactly one HTTP verb function, `doGet`), and strips five live secret fields (agent passphrase, IPsec PSK, WireGuard private key, VM VNC password, image-export Samba password) from every response before it reaches a tool result — see `secret-redaction.test.ts`.
+- **Vendor-documented, not independently verified (hedged deliberately):** whether the Read Only role's restriction is enforced server-side against every mutating endpoint (vs. merely hidden in the console UI) has not been tested against a live Read Only account. This role is also opt-in, not default — a token from an Account Owner/Admin user (the common case for a fresh account) has no such restriction.
+
+**Do not read this connector, or this README, as having established that every Slide token is read-only** — only that this connector's own code never attempts a mutation, and that Slide offers (but does not default to) a way to make the credential itself read-only as well.
+
 ## Development
 
 ```bash
