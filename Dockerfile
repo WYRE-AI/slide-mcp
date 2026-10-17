@@ -45,6 +45,10 @@ ENV NODE_ENV=production
 ENV LOG_LEVEL=info
 ENV MCP_TRANSPORT=http
 ENV MCP_HTTP_PORT=8080
+# All interfaces inside the container. Startup still refuses to run unless
+# CONDUIT_S2S_SECRET is a real secret (empty values and known placeholders
+# exit non-zero). MCP_ALLOW_INSECURE_DEV=1 binds 127.0.0.1 only, even when
+# this host is 0.0.0.0. Gateway mode reads X-Slide-Api-Token per request.
 ENV MCP_HTTP_HOST=0.0.0.0
 ENV AUTH_MODE=gateway
 
