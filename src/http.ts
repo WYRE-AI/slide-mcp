@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { createServer } from './server.js';
 import { runWithCredentials } from './client.js';
 import { logger } from './utils/logger.js';
+import { MAX_REQUEST_BODY_BYTES } from './input-limits.js';
 import { verifyS2sHeader, S2S_HEADER } from './s2s-verify.js';
 
 // Conduit service-to-service auth (gateway#377 parity). HTTP startup fails
@@ -145,6 +146,31 @@ export async function startHttpTransport(): Promise<Server> {
 
     const apiToken = headerValue(req.headers['x-slide-api-token']);
 
+    // Gateway mode: the Slide token must arrive on every request via
+    // X-Slide-Api-Token. Reject explicitly if it is missing. Falling through
+    // would resolve SLIDE_API_TOKEN from the process environment, which is
+    // not request-scoped (CWE-306). Runs before the body cap so 401 pre-empts 413.
+    if (isGatewayMode && !apiToken) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(GATEWAY_CREDENTIALS_UNAUTHORIZED));
+      return;
+    }
+
+    // Body cap runs only after S2S and the gateway credential check pass, so
+    // unauthenticated callers still get 401.
+    const contentLength = Number(headerValue(req.headers['content-length']));
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          error: { code: -32600, message: `Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes` },
+          id: null,
+        }),
+      );
+      return;
+    }
+
     const handle = async () => {
       // SECURITY-CRITICAL invariant: this transport MUST stay stateless
       // (sessionIdGenerator: undefined + enableJsonResponse: true).
@@ -158,6 +184,7 @@ export async function startHttpTransport(): Promise<Server> {
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
+        maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
       });
       res.on('close', () => {
         transport.close();
@@ -166,20 +193,6 @@ export async function startHttpTransport(): Promise<Server> {
       await server.connect(transport);
       await transport.handleRequest(req, res);
     };
-
-    // Gateway mode: the Slide token must arrive on every request via
-    // X-Slide-Api-Token. Reject explicitly if it is missing. Falling through
-    // would resolve SLIDE_API_TOKEN from the process environment, which is
-    // not request-scoped (CWE-306).
-    if (isGatewayMode) {
-      if (!apiToken) {
-        res.writeHead(401, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(GATEWAY_CREDENTIALS_UNAUTHORIZED));
-        return;
-      }
-      await runWithCredentials({ apiToken }, handle);
-      return;
-    }
 
     if (apiToken) {
       await runWithCredentials({ apiToken }, handle);
